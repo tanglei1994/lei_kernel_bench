@@ -12,8 +12,8 @@ using namespace sycl;
 
 template <typename rtype>
 inline rtype generate_random(rtype a = 0.0, rtype b = 1.0) {
-    // unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    unsigned seed = 202310;
+    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+    // unsigned seed = 202310;
     std::default_random_engine engine(seed);
     std::uniform_real_distribution<rtype> distribution(a, b);
 

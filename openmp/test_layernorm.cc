@@ -1,7 +1,5 @@
 #include "utils.hpp"
 
-using namespace sycl;
-
 #define M 512
 #define N 1024
 

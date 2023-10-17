@@ -6,11 +6,11 @@
 using namespace sycl;
 
 #define M 512
-#define N 4096
+#define N 1024
 
 int main() {
     float eps = 0.0001f;
-    constexpr size_t VL = 256;
+    constexpr size_t VL = 128;
     property_list properties{property::queue::enable_profiling()};
     queue q(properties);
     auto context = q.get_info<info::queue::context>();
@@ -96,26 +96,26 @@ int main() {
 #endif
 #endif
         for (int i = 0; i < M; i++) {
-            auto sum_mean = _mm512_setzero_ps();
+            // auto sum_mean = _mm512_setzero_ps();
             auto sum_var = _mm512_setzero_ps();
             for (int j = 0; j < N; j += 16) {
                 auto dat = _mm512_loadu_ps(src + i * N + j);
                 auto avg_dat = _mm512_div_ps(dat, len_v);
-                sum_mean = _mm512_add_ps(sum_mean, avg_dat);
+                // sum_mean = _mm512_add_ps(sum_mean, avg_dat);
                 sum_var = _mm512_fmadd_ps(avg_dat, dat, sum_var);
             }
 
-            auto mean_val = _mm512_reduce_add_ps(sum_mean);
-            auto var_val = _mm512_reduce_add_ps(sum_var) - mean_val * mean_val;
+            // auto mean_val = _mm512_reduce_add_ps(sum_mean);
+            auto var_val = _mm512_reduce_add_ps(sum_var);
             
-            auto mean = _mm512_set1_ps(mean_val);
+            // auto mean = _mm512_set1_ps(mean_val);
             auto var = _mm512_rsqrt14_ps(_mm512_add_ps(eps_v, _mm512_set1_ps(var_val)));
 
             // layernorm 
             for (int j = 0; j < N; j += 16) {
                 auto amplifier = _mm512_mul_ps(_mm512_loadu_ps(static_cast<float *>(gamma) + j), var);
-                auto offset = _mm512_fmsub_ps(amplifier, mean, _mm512_load_ps(static_cast<float *>(beta) + j));
-                auto dst_val = _mm512_fmsub_ps(amplifier, _mm512_loadu_ps(static_cast<float *>(src) + i * N + j), offset);
+                // auto offset = _mm512_fmsub_ps(amplifier, mean, _mm512_load_ps(static_cast<float *>(beta) + j));
+                auto dst_val = _mm512_mul_ps(amplifier, _mm512_loadu_ps(static_cast<float *>(src) + i * N + j));
                 _mm512_storeu_ps(static_cast<float *>(dst) + i * N + j, dst_val);
             }
         }
@@ -184,7 +184,7 @@ int main() {
                 using namespace sycl::ext::intel::esimd;
                 int i = idx[0];
                 // float mean = 0.0f;
-                simd<float, VL> mean_v(0.0f);
+                // simd<float, VL> mean_v(0.0f);
                 // for (size_t i = 0; i < VL; i++) {
                 //     mean_v[i] = 0.0f;
                 // }
@@ -195,17 +195,17 @@ int main() {
                 // }
                 for (int j = 0; j < N; j += VL) {
                     simd<float, VL> tmp(src_gpu + i * N + j);
-                    if (i == 0 && j == 8) {
-                        float tmp_p = tmp.select<1,1>(7);
-                        sycl::ext::oneapi::experimental::printf("vec src_gpu[15]:%f\n", tmp_p);
-                    }
-                    mean_v += tmp;
+                    // if (i == 0 && j == 8) {
+                    //     float tmp_p = tmp.select<1,1>(7);
+                    //     sycl::ext::oneapi::experimental::printf("vec src_gpu[15]:%f\n", tmp_p);
+                    // }
+                    // mean_v += tmp;
                     var_v += tmp * tmp;
                 }
-                mean_v /= N;
-                float mean = sum<float, float, VL>(mean_v);
+                // mean_v /= N;
+                // float mean = sum<float, float, VL>(mean_v);
                 float var = sum<float, float, VL>(var_v);
-                var = var / N - mean * mean;
+                var = var / N;
                 auto rsqrt_var = sycl::ext::intel::esimd::rsqrt(var + eps);
                 // if (i == 0) {
                 //     sycl::ext::oneapi::experimental::printf("mean:%f rsqrt_var:%f\n", mean, rsqrt_var);
@@ -216,10 +216,11 @@ int main() {
                     simd<float, VL> gamma_gpu_v(gamma_gpu + j);
                     simd<float, VL> amplifier_v = gamma_gpu_v * rsqrt_var;
 
-                    simd<float, VL> beta_gpu_v(beta_gpu + j);
-                    simd<float, VL> offset_v = amplifier_v * mean - beta_gpu_v;
+                    // simd<float, VL> beta_gpu_v(beta_gpu + j);
+                    // simd<float, VL> offset_v = amplifier_v * mean - beta_gpu_v;
                     simd<float, VL> tmp(src_gpu + i * N + j);
-                    simd<float, VL> dst_gpu_v = amplifier_v * tmp - offset_v;
+                    // simd<float, VL> dst_gpu_v = amplifier_v * tmp - offset_v;
+                    simd<float, VL> dst_gpu_v = amplifier_v * tmp;
                     // if (i == 0 && j == 8) {
                     //     float tmp_p = dst_gpu_v.select<1,1>(7);
                     //     sycl::ext::oneapi::experimental::printf("vec dst_gpu[15]:%f\n", tmp_p);
@@ -264,3 +265,4 @@ int main() {
 
     return 0;
 }
+
