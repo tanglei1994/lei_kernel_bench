@@ -17,12 +17,6 @@ int main() {
     auto device = q.get_info<info::queue::device>();
 
     constexpr size_t size_a = M * N;
-    // auto src = alloc_device_and_init<float>(
-    //     size_a,
-    //     [](float* data, size_t idx) {
-    //         data[idx] = generate_random<float>();
-    //     },
-    //     q, device, context);
     auto src = alloc_host_and_init<float>(
         size_a,
         [](float* data, size_t idx) {
@@ -32,12 +26,6 @@ int main() {
         DEVICE_MEM_ALIGNMENT, size_a * sizeof(float), device, context));
     q.memcpy((void *)src_gpu, (void *)src, size_a * sizeof(float)).wait();
 
-    // auto gamma = alloc_device_and_init<float>(
-    //     N,
-    //     [](float* data, size_t idx) {
-    //         data[idx] = generate_random<float>(0.5, 1.0);
-    //     },
-    //     q, device, context);
     auto gamma = alloc_host_and_init<float>(
         N,
         [](float* data, size_t idx) {
@@ -47,12 +35,6 @@ int main() {
         DEVICE_MEM_ALIGNMENT, N * sizeof(float), device, context));
     q.memcpy((void *)gamma_gpu, (void *)gamma, N * sizeof(float)).wait();
 
-    // auto beta = alloc_device_and_init<float>(
-    //     N,
-    //     [](float* data, size_t idx) {
-    //         data[idx] = generate_random<float>();
-    //     },
-    //     q, device, context);
     auto beta = alloc_host_and_init<float>(
         N,
         [](float* data, size_t idx) {
@@ -62,12 +44,6 @@ int main() {
         DEVICE_MEM_ALIGNMENT, N * sizeof(float), device, context));
     q.memcpy((void *)beta_gpu, (void *)beta, N * sizeof(float)).wait();
 
-    // auto dst = alloc_device_and_init<float>(
-    //     size_a,
-    //     [](float* data, size_t idx) {
-    //         data[idx] = 0.0f;
-    //     },
-    //     q, device, context);
     auto dst = alloc_host_and_init<float>(
         size_a,
         [](float* data, size_t idx) {
