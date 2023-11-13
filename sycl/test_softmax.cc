@@ -39,6 +39,9 @@ void softmax_cpu(float *src, int batchSize, int kvLen) {
             sum_arr_i += exp_arr;
         }
         float sum_i = _mm512_reduce_add_ps(sum_arr_i);
+        if (i == 311) {
+          std::cout << "sum_i_cpu:" << sum_i << std::endl;
+        }
 
         sum_arr_i = _mm512_set1_ps(sum_i);
         for (int j = 0; j < kvLen; j += 16) {
@@ -52,12 +55,12 @@ void softmax_cpu(float *src, int batchSize, int kvLen) {
 auto softmax_half(queue &main_queue, half *src, int batchSize,
                   int kvLen) {
   unsigned batch_collapse = batchSize;
-  constexpr unsigned VL = 256;
+  constexpr unsigned VL = 16;
   unsigned GROUPSIZE = kvLen / VL;
-  unsigned remainder = kvLen % VL;
-  if (remainder != 0) {
-    GROUPSIZE += 1;
-  }
+  // unsigned remainder = kvLen % VL;
+  // if (remainder != 0) {
+  //   GROUPSIZE += 1;
+  // }
 
   nd_range<1> NDR{range<1>{batch_collapse * GROUPSIZE}, range<1>{GROUPSIZE}};
 
@@ -119,17 +122,18 @@ auto softmax_float(queue &main_queue, float *src, int batchSize,
   unsigned batch_collapse = batchSize;
   constexpr unsigned VL = 256;
   unsigned GROUPSIZE = kvLen / VL;
-  unsigned remainder = kvLen % VL;
-  if (remainder != 0) {
-    GROUPSIZE += 1;
-  }
+  // unsigned remainder = kvLen % VL;
+  // if (remainder != 0) {
+  //   GROUPSIZE += 1;
+  // }
 
   nd_range<1> NDR{range<1>{batch_collapse * GROUPSIZE}, range<1>{GROUPSIZE}};
 
   event softmax = main_queue.submit([&](handler &h) {
     h.parallel_for(NDR, [=](nd_item<1> idx) SYCL_ESIMD_KERNEL {
       using namespace sycl::ext::intel::esimd;
-      slm_init<256>();
+      // slm_init<256>();
+      slm_init<1024>();
       int local_id = idx.get_local_linear_id();
       int group_id = idx.get_group_linear_id();
     //   sycl::ext::oneapi::experimental::printf("local_id:%d\n", local_id);
@@ -147,34 +151,35 @@ auto softmax_float(queue &main_queue, float *src, int batchSize,
     //   }
       max_arr = sycl::ext::intel::esimd::max<float, VL>(src_arr, max_arr);
       slm_scalar_store<float>(local_id * 4, hmax<float>(max_arr));
-      // idx.barrier();
+      idx.barrier();
 
       auto max_val = std::numeric_limits<float>::lowest();
-      // auto slm_max_arr = slm_block_load<float, 16>(0);
+      auto slm_max_arr = slm_block_load<float, 16>(0);
       // idx.barrier();
-      // max_val = std::max(max_val, hmax<float>(slm_max_arr));
-#pragma unroll
-      for (int i = 0; i < GROUPSIZE; ++i) {
-        max_val = sycl::ext::intel::esimd::max<float>(
-            max_val, slm_scalar_load<float>(i * 4));
-      }
+      max_val = std::max(max_val, hmax<float>(slm_max_arr));
+// #pragma unroll
+//       for (int i = 0; i < GROUPSIZE; ++i) {
+//         max_val = sycl::ext::intel::esimd::max<float>(
+//             max_val, slm_scalar_load<float>(i * 4));
+//       }
 
       src_arr = sycl::ext::intel::esimd::exp<float, VL>(src_arr - max_val);
       slm_scalar_store<float>(local_id * 4,
                               reduce<float>(src_arr, std::plus<>()));
 
-      // idx.barrier();
+      idx.barrier();
       auto sum_val = 0.f;
-      // auto slm_partial_sum_arr = slm_block_load<float, 16>(0);
+      auto slm_partial_sum_arr = slm_block_load<float, 16>(0);
       // idx.barrier();
-      // sum_val = reduce<float>(slm_partial_sum_arr, std::plus<>());
-#pragma unroll
-      for (int i = 0; i < GROUPSIZE; ++i) {
-        sum_val += slm_scalar_load<float>(i * 4);
-      }
-      if (group_id == 311 && local_id == 0) {
-        sycl::ext::oneapi::experimental::printf("sum_val:%f\n", sum_val);
-      }
+      sum_val = reduce<float>(slm_partial_sum_arr, std::plus<>());
+// #pragma unroll
+//       for (int i = 0; i < GROUPSIZE; ++i) {
+//         sum_val += slm_scalar_load<float>(i * 4);
+//       }
+      // idx.barrier();
+      // if (group_id == 311 && local_id == 0) {
+      //   sycl::ext::oneapi::experimental::printf("sum_val:%f\n", sum_val);
+      // }
 
       src_arr = src_arr / sum_val;
       src_arr.copy_to(src + offset);
@@ -244,7 +249,7 @@ auto softmax_float_1d(queue &main_queue, float *src, int batchSize,
 
 
 int main() {
-    int warmup_time = 5;
+    int warmup_time = 2;
     constexpr size_t VL = 16;
     property_list properties{property::queue::enable_profiling()};
     queue q(properties);
@@ -278,9 +283,9 @@ int main() {
     std::cout << "*****vectorization warmup stage*****" << std::endl;
     for (int it = 0; it < warmup_time; it++) {
         auto t1 = std::chrono::steady_clock::now();   // Start timing
-        // auto event = softmax_half(q, softmax_src_gpu, M, N);
-        // auto event = softmax_float(q, src_gpu, M, N);
-        auto event = softmax_float_1d(q, src_gpu, M, N);
+        // auto event = softmax_half(q, src_gpu, M, N);
+        auto event = softmax_float(q, src_gpu, M, N);
+        // auto event = softmax_float_1d(q, src_gpu, M, N);
         event.wait();
         auto t2 = std::chrono::steady_clock::now();   // Stop timing
         auto exec_time = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
