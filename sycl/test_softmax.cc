@@ -9,7 +9,7 @@ using namespace sycl;
 // #define N 4109
 // #define N 4351
 // #define N 4097
-#define N (2049)
+#define N (4093)
 
 // at::Tensor esimd_softmax_fp32(at::Tensor &src, at::Tensor &mask)
 // {
@@ -98,30 +98,29 @@ auto softmax_float_mask_lw(queue &main_queue, float *src, int batchSize,
   unsigned GROUPSIZE = (kvLen - 1) / VL + 1;
   auto seq_len = kvLen % 256;
 
-  // auto result = at::empty_like(src);
-
-  // auto src_ptr = src.data_ptr<float>();
-  // auto dst_ptr = result.data_ptr<float>();
-  // auto mask_ptr = (const unsigned short *)(mask.data_ptr<short>());
-
   nd_range<1> NDR{range<1>{batchSize * GROUPSIZE}, range<1>{GROUPSIZE}};
 
   event softmax = main_queue.submit([&](handler &h)
                                     { h.parallel_for(NDR, [=](nd_item<1> idx) SYCL_ESIMD_KERNEL
                                                      {
       using namespace sycl::ext::intel::esimd;
-      slm_init<256>();
+      auto lowest_f32 = std::numeric_limits<float>::lowest();
+      slm_init<64>();
+      simd<float, 16> slm_fill = lowest_f32;
+      slm_block_store<float>(0, slm_fill);
+      idx.barrier();
+
       int local_id = idx.get_local_linear_id();
       int group_id = idx.get_group_linear_id();
 
       auto offset = group_id * kvLen + local_id * VL;
-      simd<float, VL> max_arr = std::numeric_limits<float>::lowest();
+      simd<float, VL> max_arr = lowest_f32;
 
       simd<float, VL> src_arr(src + offset);
       if (local_id == (GROUPSIZE - 1) && seq_len) {
         simd_mask<VL> mask_arr;
         mask_arr.copy_from(mask_init);
-        simd<float, VL> tmp = std::numeric_limits<float>::lowest();
+        simd<float, VL> tmp = lowest_f32;
         tmp.merge(src_arr, mask_arr);
         src_arr = tmp;
       }
@@ -129,92 +128,13 @@ auto softmax_float_mask_lw(queue &main_queue, float *src, int batchSize,
       slm_scalar_store<float>(local_id * 4, hmax<float>(max_arr));
       idx.barrier();
 
-      auto max_val = std::numeric_limits<float>::lowest();
+      auto max_val = lowest_f32;
 
-      // simd<float, 16> slm_max_arr_16, tmp_16 = max_val;
-      // simd_mask<16> slm_max_arr_mask_16 = 1;
+      auto slm_max_arr = slm_block_load<float, 16>(0);
+      max_val = std::max(max_val, hmax<float>(slm_max_arr));
 
-      // simd<float, 8> slm_max_arr_8, tmp_8 = max_val;
-      // simd_mask<8> slm_max_arr_mask_8 = 1;
-      // simd<float, 4> slm_max_arr_4, tmp_4 = max_val;
-      // simd_mask<4> slm_max_arr_mask_4 = 0;
-
-      // if (GROUPSIZE == 16) {
-      //   slm_max_arr_16 = slm_block_load<float, 16>(0);
-      //   max_val = std::max(max_val, hmax<float>(slm_max_arr_16));
-      // } else if (GROUPSIZE > 8 && GROUPSIZE < 16) {
-      //     for (int i = 8; i < GROUPSIZE; i++) {
-      //       // if (group_id == 0 && local_id == 0) {
-      //       //   sycl::ext::oneapi::experimental::printf("local_id:%d group_size:%d\n", local_id, GROUPSIZE);
-      //       // }
-      //       slm_max_arr_mask_16[i] = 0;
-      //     }
-      //     slm_max_arr_16 = slm_block_load<float, 16>(0);
-      //     tmp_16.merge(slm_max_arr_16, slm_max_arr_mask_16);
-      //     slm_max_arr_16 = tmp_16;
-      //     max_val = std::max(max_val, hmax<float>(slm_max_arr_16));
-      // }
-
-      // switch (GROUPSIZE) {
-      //   case 16: 
-      //     slm_max_arr_16 = slm_block_load<float, 16>(0);
-      //     max_val = std::max(max_val, hmax<float>(slm_max_arr_16));
-      //     break;
-        // case 15:
-        // case 14:
-        // case 13:
-        // case 12:
-        // case 11:
-        // case 10:
-        // case 9:
-        //   for (int i = 8; i < GROUPSIZE; i++) {
-        //     // if (group_id == 0 && local_id == 0) {
-        //     //   sycl::ext::oneapi::experimental::printf("local_id:%d group_size:%d\n", local_id, GROUPSIZE);
-        //     // }
-        //     slm_max_arr_mask_16[i] = 0;
-        //   }
-        //   slm_max_arr_16 = slm_block_load<float, 16>(0);
-        //   tmp_16.merge(slm_max_arr_16, slm_max_arr_mask_16);
-        //   slm_max_arr_16 = tmp_16;
-        //   max_val = std::max(max_val, hmax<float>(slm_max_arr_16));
-        //   break;
-        // case 8:
-        // case 7:
-        // case 6:
-        // case 5:
-        //   for (int i = 4; i < GROUPSIZE; i++) {
-        //     slm_max_arr_mask_8[i] = 0;
-        //   }
-        //   slm_max_arr_8 = slm_block_load<float, 8>(0);
-        //   tmp_8.merge(slm_max_arr_8, slm_max_arr_mask_8);
-        //   slm_max_arr_8 = tmp_8;
-          // if (group_id == 0 && local_id == 0) {
-          //   sycl::ext::oneapi::experimental::printf("inside sc\n");
-          // }
-          // max_val = std::max(max_val, hmax<float>(slm_max_arr_8));
-          // break;
-        // case 4:
-        // case 3:
-        // case 2:
-        // case 1:
-        //   for (int i = 0; i < GROUPSIZE; i++) {
-        //     slm_max_arr_mask_4[i] = 1;
-        //   }
-        //   slm_max_arr_4 = slm_block_load<float, 4>(0);
-        //   tmp_4.merge(slm_max_arr_4, slm_max_arr_mask_4);
-        //   slm_max_arr_4 = tmp_4;
-        //   max_val = std::max(max_val, hmax<float>(slm_max_arr_4));
-        //   break;
-      // }
-
-      // auto slm_max_arr = slm_block_load<float, 16>(0);
-      // max_val = std::max(max_val, hmax<float>(slm_max_arr));
-
-#pragma unroll
-      for (int i = 0; i < GROUPSIZE; ++i) {
-        max_val = sycl::ext::intel::esimd::max<float>(
-            max_val, slm_scalar_load<float>(i * 4));
-      }
+      slm_fill = 0.0f;
+      slm_block_store<float>(0, slm_fill);
       idx.barrier();
 
       src_arr = sycl::ext::intel::esimd::exp<float, VL>(src_arr - max_val);
@@ -222,17 +142,12 @@ auto softmax_float_mask_lw(queue &main_queue, float *src, int batchSize,
       idx.barrier();
 
       auto sum_val = 0.f;
-      // auto slm_partial_sum_arr = slm_block_load<float, 16>(0);
-      // sum_val = reduce<float>(slm_partial_sum_arr, std::plus<>());
-#pragma unroll
-      for (int i = 0; i < GROUPSIZE; ++i) {
-        sum_val += slm_scalar_load<float>(i * 4);
-      }
-      idx.barrier();
+      auto slm_partial_sum_arr = slm_block_load<float, 16>(0);
+      sum_val = reduce<float>(slm_partial_sum_arr, std::plus<>());
 
       src_arr = src_arr / sum_val;
       if (local_id == (GROUPSIZE - 1) && seq_len) {
-        simd<uint32_t, 32> res_offsets;
+        simd<uint32_t, 32> res_offsets = 0;
         for(int k = 0; k < 32; ++k) {
           res_offsets[k] = k * 4;
         }
@@ -654,7 +569,7 @@ auto softmax_float_1d(queue &main_queue, float *src, int batchSize,
 
 
 int main() {
-    int warmup_time = 5;
+    int warmup_time = 1;
     constexpr size_t VL = 16;
     property_list properties{property::queue::enable_profiling()};
     queue q(properties);
