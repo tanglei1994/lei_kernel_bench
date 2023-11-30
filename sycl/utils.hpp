@@ -5,6 +5,7 @@
 #include <CL/sycl.hpp>
 #include <omp.h>
 #include <immintrin.h>
+#include <cmath>
 
 using namespace sycl;
 
@@ -125,4 +126,33 @@ inline __m512 _dil_exp_kernel(__m512 vec_src)
   vec_res = _mm512_mul_ps(vec_res, vec_two_pow_n);
   vec_res = _mm512_mul_ps(vec_res, vec_two);
   return vec_res;
+}
+
+template<typename T>
+T abs_error(T* src1, T* src2, int size) {
+    T total_error = 0.0f;
+    for (size_t i = 0; i < size; i++) {
+        T v1 = src1[i];
+        T v2 = src2[i];
+        auto delt = v1 - v2;
+        if (i == 111) {
+            std::cout << "i:" << i << std::endl;
+            std::cout << "src1[i]:" << v1 << std::endl;
+            std::cout << "src2[i]:" << v2 << std::endl;
+        }
+        total_error += abs(delt);
+    }
+    return total_error;
+}
+
+template<typename T>
+T square_error(T* src1, T* src2, int size) {
+    T total_error = 0.0f;
+    for (size_t i = 0; i < size; i++) {
+        T v1 = src1[i];
+        T v2 = src2[i];
+        auto delt = v1 - v2;
+        total_error += (delt * delt);
+    }
+    return total_error;
 }
